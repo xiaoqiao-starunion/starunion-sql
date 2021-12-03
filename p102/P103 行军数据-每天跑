@@ -1,0 +1,5 @@
+P103 行军数据-每天跑
+select m.* from log_missions as m, log_energy as e 
+where m.troops_id = e.action_id and e.action not in ('1521','1467','1469','1460','1022') 
+and m.server_id in ('S16','S17')
+and m.role_id in (select uuid from roles where is_internal=false)
