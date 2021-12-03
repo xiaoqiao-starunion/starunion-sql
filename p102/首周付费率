@@ -1,0 +1,116 @@
+select count(distinct uuid) as reg_uv
+		,reg_day
+		,count(distinct if (diff<=6,role_id,0)) as paid_uv 
+
+from
+(
+	select uuid,role_id,reg_day,
+		DATE_DIFF ( 'day', DATE_PARSE ( reg_day, '%Y-%m-%d' ), DATE_PARSE (pay_day, '%Y-%m-%d' ) ) AS diff
+
+from
+(
+	select uuid,DATE_FORMAT( FROM_UNIXTIME( created_at ) AT TIME ZONE 'UTC', '%Y-%m-%d' ) as reg_day 
+	from roles
+	where is_internal=false and server_id!='1'
+) as t1
+left join 
+( 	select role_id,
+	DATE_FORMAT( FROM_UNIXTIME( created_at ) AT TIME ZONE 'UTC', '%Y-%m-%d' ) as 	pay_day 
+	from payments
+	where is_paid=1
+	and is_test=2
+	and status=2 
+	group by role_id,DATE_FORMAT( FROM_UNIXTIME( created_at ) AT TIME ZONE 'UTC', '%Y-%m-%d' )  
+) as t2
+on t1.uuid=t2.role_id
+) as a
+group by reg_day
+
+
+
+
+select
+cre_nums, total.*
+from(
+select row_number() over(partition by first_day order by create_time_range)rnk, * 
+from (
+select 
+first_day,
+ concat(date_format(date_add('day',(role_diff_day-1)*7,DATE(FROM_UNIXTIME(daily_tag))),'%Y-%m-%d'),' 至 ', DATE_FORMAT(date_add('day',role_diff_day*7-1,DATE(FROM_UNIXTIME(daily_tag))),'%Y-%m-%d') ) create_time_range, 
+count(distinct uuid) nums
+from(
+select 
+	logins.uuid, 
+	time_tag.*,
+	DATE_FORMAT( FROM_UNIXTIME( created_at) AT TIME ZONE '+00:00', '%Y-%m-%d' ) first_day,
+ 	DATE_FORMAT( FROM_UNIXTIME( event_time ) AT TIME ZONE 'UTC', '%Y-%m-%d' ) AS login_day,
+			(
+              DATE_DIFF (
+				'day',
+				DATE_PARSE ( DATE_FORMAT( FROM_UNIXTIME( daily_tag) AT TIME ZONE '+00:00', '%Y-%m-%d' ), '%Y-%m-%d' ),
+			DATE_PARSE ( DATE_FORMAT( FROM_UNIXTIME(  event_time) AT TIME ZONE '+00:00', '%Y-%m-%d' ), '%Y-%m-%d' ))/ 7+1 
+		) AS role_diff_day
+from (
+select 
+roles.*, payments.created_at event_time
+from
+(select * from roles where is_internal =false and created_at >= 1619827200 and base_level != 0 )roles inner join 
+(SELECT
+			* 
+		FROM
+			(
+				( SELECT role_id, account_id, created_at, server_id, country, price, is_paid, is_test, STATUS, pay_type, pay_channel, device_os, device_id FROM payments 
+				where is_paid=1
+				and is_test=2
+				and status=2
+
+				) UNION
+				(
+				SELECT
+					role_id,
+					roles.account_id,
+					verify_at AS created_at,
+					server_id,
+					country,
+					usd_amount AS price,
+				IF
+					( is_statistics = 1 OR is_statistics = 3, 1, 0 ) AS is_paid,
+					2 AS is_test,
+					2 AS STATUS,
+					2 AS pay_type,
+					pay_channel,
+					'' AS device_os,
+					'' AS device_id 
+				FROM
+					account_balance_recharges
+					INNER JOIN roles ON roles.uuid = account_balance_recharges.role_id 
+				WHERE
+					type IN ( 3, 1 ) 
+					AND is_statistics IN ( 1, 3 ) 
+					AND account_balance_recharges.STATUS = 3 
+				) 
+			) temp_payment 
+		) payments
+ on roles.uuid = payments.role_id
+where payments.created_at >= 1619827200
+) logins ,
+  (SELECT
+		date_format( x, '%Y-%m-%d' ) daily,
+		cast( to_unixtime ( x ) AS INTEGER ) daily_tag 
+	FROM
+		unnest (
+		sequence ( cast ( '2021-05-01' AS date ), CURRENT_DATE, INTERVAL '1' DAY )) t ( x ) 
+	) time_tag 
+WHERE
+DATE_FORMAT( FROM_UNIXTIME( logins.created_at) AT TIME ZONE '+00:00', '%Y-%m-%d' ) = daily
+)
+where role_diff_day <=6
+group by first_day,
+concat(date_format(date_add('day',(role_diff_day-1)*7,DATE(FROM_UNIXTIME(daily_tag))),'%Y-%m-%d'),' 至 ', DATE_FORMAT(date_add('day',role_diff_day*7-1,DATE(FROM_UNIXTIME(daily_tag))),'%Y-%m-%d') )  
+  ))total 
+  inner join (
+  select count(uuid)cre_nums , DATE_FORMAT( FROM_UNIXTIME( created_at) AT TIME ZONE '+00:00', '%Y-%m-%d' ) first_day
+                from roles where is_internal =false and created_at >= 1619827200  and base_level != 0
+               group by DATE_FORMAT( FROM_UNIXTIME( created_at) AT TIME ZONE '+00:00', '%Y-%m-%d' ) ) roles
+     on total.first_day = roles.first_day
+    where rnk =1

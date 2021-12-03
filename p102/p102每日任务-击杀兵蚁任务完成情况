@@ -1,0 +1,26 @@
+每日任务-击杀兵蚁任务完成情况
+dau、完成人数
+
+select t1.server_id,log_day,dau,uv,pv
+from 
+( select count(distinct role_id) as dau,server_id,log_day
+from
+(
+select role_id,server_id,DATE_FORMAT( FROM_UNIXTIME(created_at ) AT TIME ZONE 'UTC', '%Y-%m-%d' ) as log_day
+from log_login_role 
+where role_id in (select uuid from roles where is_internal=false and server_id!='1')
+)as tmp
+group by server_id,log_day
+
+) as t1
+left join
+(
+select  count(distinct role_id) as uv ,sum(1) as pv,extend_1,server_id,
+DATE_FORMAT( FROM_UNIXTIME(created_at ) AT TIME ZONE 'UTC', '%Y-%m-%d' ) as task_day
+from log_activity_score
+where ac_id='1000100' and extend_1='5100503'
+and role_id in (select uuid from roles where is_internal=false and server_id!='1')
+group by extend_1,DATE_FORMAT( FROM_UNIXTIME(created_at ) AT TIME ZONE 'UTC', '%Y-%m-%d' ),server_id
+
+)as t2
+on t1.log_day=t2.task_day and t1.server_id=t2.server_id 
